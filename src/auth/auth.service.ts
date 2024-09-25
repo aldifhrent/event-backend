@@ -3,12 +3,14 @@ import {
   UnprocessableEntityException,
   BadRequestException,
   ForbiddenException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/lib/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { LoginUserDTO } from './dto/login.dto';
 import { RegisterUserDTO } from './dto/register.dto';
 import * as bcrypt from 'bcrypt';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class AuthService {
@@ -17,77 +19,54 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
   private saltRounds = 10;
-  private failedLoginAttempts = new Map<string, number>(); // Track failed login attempts
 
   public async loginUser(loginUserDTO: LoginUserDTO) {
-    const { username, email, password } = loginUserDTO;
+    const { email, password } = loginUserDTO;
 
-    if (!username && !email) {
-      throw new UnprocessableEntityException('Username atau email harus diisi');
-    }
+    // Find user by email.
+    const user = await this.prismaService.user.findUnique({
+      where: {
+        email,
+      },
+    });
 
-    if (username && email) {
-      throw new UnprocessableEntityException(
-        'Harap isi username atau email saja, tidak keduanya',
-      );
-    }
-
-    let user;
-    if (email) {
-      user = await this.prismaService.user.findUnique({ where: { email } });
-    } else if (username) {
-      user = await this.prismaService.user.findUnique({ where: { username } });
-    }
-
+    // If user is not found, throw an UnauthorizedException.
     if (!user) {
-      throw new UnprocessableEntityException(
-        'Username, email, atau password tidak valid',
-      );
+      throw new UnauthorizedException('Invalid credentials');
     }
 
+    // Compare provided password with the stored hash.
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      // Track failed login attempts
-      const key = email || username;
-      const attempts = this.failedLoginAttempts.get(key) || 0;
-      this.failedLoginAttempts.set(key, attempts + 1);
-
-      if (attempts + 1 >= 5) {
-        throw new ForbiddenException(
-          'Akun terkunci karena terlalu banyak percobaan login yang gagal',
-        );
-      }
-
-      throw new UnprocessableEntityException(
-        'Username, email, atau password tidak valid',
-      );
+      throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Reset failed login attempts on successful login
-    this.failedLoginAttempts.delete(email || username);
-
-    const token = await this.jwtService.signAsync(
-      {
-        userId: user.userId,
-      },
-      { expiresIn: '1h' },
-    ); // Set token expiry
-
-    console.log('Login successful, generating token:', token); // Log token yang dihasilkan
-
-    return {
-      token,
+    // Create JWT payload and token.
+    const payload = {
+      userId: user.id,
+      username: user.username,
+      sessionId: uuidv4(),
     };
+
+    const token = this.jwtService.sign(payload, { expiresIn: '1h' });
+
+    // Store the session in the database with expiration.
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 1);
+
+    await this.prismaService.session.create({
+      data: {
+        userId: user.id,
+        sessionToken: token,
+        expires: expiresAt,
+      },
+    });
+
+    return { ...user, token };
   }
 
   public async registerUser(registerUserDTO: RegisterUserDTO) {
-    const { username, email, password } = registerUserDTO;
-
-    if (password.length < 8) {
-      throw new BadRequestException(
-        'Password harus memiliki minimal 8 karakter',
-      );
-    }
+    const { name, username, email, password } = registerUserDTO;
 
     const checkUserEmail = await this.prismaService.user.findFirst({
       where: {
@@ -106,6 +85,7 @@ export class AuthService {
         username,
         email,
         password: hashedPassword,
+        name,
       },
     });
 

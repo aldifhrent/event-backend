@@ -2,12 +2,14 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
-import { UserService } from './user/user.service';
 import { UserModule } from './user/user.module';
 import { AuthService } from './auth/auth.service';
 import { PrismaService } from './lib/prisma.service';
 import { env } from './lib/env';
 import { JwtModule } from '@nestjs/jwt';
+import { EventController } from './event/event.controller';
+import { EventModule } from './event/event.module';
+import { EventService } from './event/event.service';
 
 @Module({
   imports: [
@@ -20,8 +22,9 @@ import { JwtModule } from '@nestjs/jwt';
     }),
     AuthModule,
     UserModule,
+    EventModule,
   ],
-  controllers: [AppController],
-  providers: [AppService, AuthService, PrismaService],
+  controllers: [AppController, EventController],
+  providers: [AppService, AuthService, PrismaService, EventService],
 })
 export class AppModule {}

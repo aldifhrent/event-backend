@@ -1,7 +1,10 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsString, Max, Min, MinLength } from 'class-validator';
 
 export class RegisterUserDTO {
+  @IsString()
+  readonly name: string;
+
   @IsString()
   readonly username: string;
 
